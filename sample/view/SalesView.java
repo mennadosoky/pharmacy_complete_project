@@ -5,6 +5,8 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.RadioButton;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
@@ -26,6 +28,16 @@ public class SalesView {
     private final Label priceLabel = new Label("Unit price: -");
     private final Label totalLabel = new Label("Total: 0.00");
     private final Button sellButton = new Button("Sell");
+    private final Button simulateButton = new Button("👥  Simulate 2 users");
+
+    private final RadioButton syncOnRadio = new RadioButton("With synchronization");
+    private final RadioButton syncOffRadio = new RadioButton("Without synchronization");
+
+    // the two users of the simulation: each one chooses his own medicine and quantity
+    private final ComboBox<Medicine> userAMedicineBox = new ComboBox<>();
+    private final TextField userAQuantityField = new TextField();
+    private final ComboBox<Medicine> userBMedicineBox = new ComboBox<>();
+    private final TextField userBQuantityField = new TextField();
 
     private final Label todayLabel = new Label();
 
@@ -73,11 +85,56 @@ public class SalesView {
         quantityField.setPrefHeight(40);
 
         sellButton.setPrefHeight(40);
+        simulateButton.setPrefHeight(40);
 
         HBox formRow = new HBox(15, medicineBox, quantityField, sellButton);
         formRow.setAlignment(Pos.CENTER_LEFT);
 
         HBox infoRow = new HBox(30, priceLabel, totalLabel);
+
+        // ---------------- Simulation mode (used by "Simulate 2 users") ----------------
+
+        ToggleGroup modeGroup = new ToggleGroup();
+
+        syncOnRadio.setToggleGroup(modeGroup);
+        syncOffRadio.setToggleGroup(modeGroup);
+
+        syncOnRadio.setSelected(true);
+
+        HBox modeRow = new HBox(20,
+                new Label("Simulation mode:"),
+                syncOnRadio,
+                syncOffRadio
+        );
+
+        modeRow.setAlignment(Pos.CENTER_LEFT);
+
+        // ---------------- User A and User B (each chooses his own sale) ----------------
+
+        setupUserBox(userAMedicineBox, userAQuantityField);
+        setupUserBox(userBMedicineBox, userBQuantityField);
+
+        Label userALabel = new Label("User A");
+        Label userBLabel = new Label("User B");
+
+        userALabel.setMinWidth(60);
+        userBLabel.setMinWidth(60);
+
+        HBox userARow = new HBox(15, userALabel, userAMedicineBox, userAQuantityField);
+        HBox userBRow = new HBox(15, userBLabel, userBMedicineBox, userBQuantityField);
+
+        userARow.setAlignment(Pos.CENTER_LEFT);
+        userBRow.setAlignment(Pos.CENTER_LEFT);
+
+        Label simulationTitle = new Label("Two users sell at the same time");
+
+        VBox simulationBox = new VBox(10,
+                simulationTitle,
+                modeRow,
+                userARow,
+                userBRow,
+                simulateButton
+        );
 
         // ---------------- History table ----------------
 
@@ -111,9 +168,23 @@ public class SalesView {
                 formRow,
                 infoRow,
                 todayLabel,
+                simulationBox,
                 historyTitle,
                 salesTable
         );
+    }
+
+    // gives a user's combo box the same look/text as the main medicine box
+    private void setupUserBox(ComboBox<Medicine> box, TextField quantity) {
+
+        box.setPromptText("Select medicine");
+        box.setPrefWidth(320);
+        box.setPrefHeight(40);
+        box.setConverter(medicineBox.getConverter());
+
+        quantity.setPromptText("Quantity");
+        quantity.setPrefWidth(120);
+        quantity.setPrefHeight(40);
     }
 
     public void setTodaySummary(int count, double revenue) {
@@ -147,6 +218,31 @@ public class SalesView {
 
     public Button getSellButton() {
         return sellButton;
+    }
+
+    public Button getSimulateButton() {
+        return simulateButton;
+    }
+
+    public ComboBox<Medicine> getUserAMedicineBox() {
+        return userAMedicineBox;
+    }
+
+    public TextField getUserAQuantityField() {
+        return userAQuantityField;
+    }
+
+    public ComboBox<Medicine> getUserBMedicineBox() {
+        return userBMedicineBox;
+    }
+
+    public TextField getUserBQuantityField() {
+        return userBQuantityField;
+    }
+
+    // true = "With synchronization" is selected, false = "Without synchronization"
+    public boolean isSynchronizedMode() {
+        return syncOnRadio.isSelected();
     }
 
     public TableView<Sale> getSalesTable() {

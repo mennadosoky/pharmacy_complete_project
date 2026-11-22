@@ -4,7 +4,14 @@ import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.scene.control.Alert;
+import javafx.application.Platform;
+import javafx.geometry.Insets;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.Label;
+import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
 
 import sample.model.Medicine;
 import sample.model.Sale;
@@ -29,6 +36,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 
 public class MedicineController {
 
@@ -79,6 +87,8 @@ public class MedicineController {
 
         view.getMedicineTable().setItems(allMedicines);
         salesView.getMedicineBox().setItems(allMedicines);
+        salesView.getUserAMedicineBox().setItems(allMedicines);
+        salesView.getUserBMedicineBox().setItems(allMedicines);
         salesView.getSalesTable().setItems(allSales);
 
         applySettings();
@@ -354,7 +364,7 @@ public class MedicineController {
     private void addMedicine() {
 
         AddMedicineView addView =
-                new AddMedicineView();
+                new AddMedicineView(allMedicines);
 
         addView.getSaveButton()
                 .setOnAction(event -> {
@@ -369,6 +379,13 @@ public class MedicineController {
 
                     addView.getStage()
                             .close();
+                });
+
+        // two users add stock to an existing medicine at the same time (demo)
+        addView.getSimulateButton()
+                .setOnAction(event -> {
+
+                    simulateTwoStockAdds(addView);
                 });
 
         addView.show();
@@ -414,16 +431,6 @@ public class MedicineController {
                 return;
             }
 
-            if (nameExists(name, null)) {
-
-                showAlert(
-                        "Invalid Data",
-                        "A medicine with this name already exists."
-                );
-
-                return;
-            }
-
             double price =
                     Double.parseDouble(
                             priceText
@@ -461,15 +468,13 @@ public class MedicineController {
                             quantity
                     );
 
-            // save to file
+            // synchronized in the service: duplicate check + save = ONE step
             service.addMedicine(
                     medicine
             );
 
-            // add to the list (listener refreshes the pages)
-            allMedicines.add(
-                    medicine
-            );
+            // the file is the source of truth: reload it into the screen list
+            reloadMedicines();
 
             refreshTable();
 
@@ -479,6 +484,14 @@ public class MedicineController {
             showAlert(
                     "Success",
                     "Medicine added successfully."
+            );
+
+        } catch (IllegalStateException e) {
+
+            // e.g. another thread already added this name
+            showAlert(
+                    "Cannot Add",
+                    e.getMessage()
             );
 
         } catch (NumberFormatException e) {
@@ -594,16 +607,6 @@ public class MedicineController {
                 return;
             }
 
-            if (nameExists(name, oldMedicine)) {
-
-                showAlert(
-                        "Invalid Data",
-                        "Another medicine already has this name."
-                );
-
-                return;
-            }
-
             if (price < 0) {
 
                 showAlert(
@@ -631,20 +634,13 @@ public class MedicineController {
                             quantity
                     );
 
+            // synchronized in the service: read + check + write = ONE step
             service.updateMedicine(
                     oldMedicine,
                     updatedMedicine
             );
 
-            int index =
-                    allMedicines.indexOf(
-                            oldMedicine
-                    );
-
-            allMedicines.set(
-                    index,
-                    updatedMedicine
-            );
+            reloadMedicines();
 
             refreshTable();
 
@@ -656,6 +652,16 @@ public class MedicineController {
                     "Medicine updated successfully."
             );
 
+        } catch (IllegalStateException e) {
+
+            // e.g. the medicine was changed/renamed by another thread
+            reloadMedicines();
+
+            showAlert(
+                    "Cannot Update",
+                    e.getMessage()
+            );
+
         } catch (NumberFormatException e) {
 
             showAlert(
@@ -665,19 +671,12 @@ public class MedicineController {
         }
     }
 
-    // true if another medicine already uses this name
-    private boolean nameExists(String name, Medicine exclude) {
+    // the file is the source of truth: reload it into the list shown on screen
+    private void reloadMedicines() {
 
-        for (Medicine medicine : allMedicines) {
-
-            if (medicine != exclude
-                    && medicine.getName().equalsIgnoreCase(name)) {
-
-                return true;
-            }
-        }
-
-        return false;
+        allMedicines.setAll(
+                service.loadMedicines()
+        );
     }
 
     // =========================================================
@@ -697,6 +696,9 @@ public class MedicineController {
 
         salesView.getSellButton()
                 .setOnAction(event -> sellMedicine());
+
+        salesView.getSimulateButton()
+                .setOnAction(event -> simulateTwoUsers());
     }
 
     private void updateSaleTotal() {
@@ -794,36 +796,37 @@ public class MedicineController {
             return;
         }
 
-        double total =
-                selected.getPrice() * quantity;
+        Sale sale;
 
-        Medicine updated =
-                new Medicine(
-                        selected.getName(),
-                        selected.getPrice(),
-                        selected.getQuantity() - quantity
-                );
+        try {
 
-        Sale sale =
-                new Sale(
-                        selected.getName(),
-                        quantity,
-                        total,
-                        LocalDateTime.now().format(FORMAT)
-                );
+            // synchronized in the service:
+            // check stock + deduct stock + record the sale = ONE step
+            sale = service.sellMedicine(
+                    selected.getName(),
+                    quantity
+            );
 
-        // save to files
-        service.updateMedicine(selected, updated);
-        saleService.addSale(sale);
+        } catch (IllegalStateException e) {
+
+            // the stock changed since this screen was loaded
+            salesView.getMedicineBox().setValue(null);
+
+            reloadMedicines();
+
+            showAlert(
+                    "Sale Failed",
+                    e.getMessage()
+            );
+
+            return;
+        }
 
         // clear the form first, then update the lists
         salesView.getMedicineBox().setValue(null);
         salesView.getQuantityField().clear();
 
-        int index =
-                allMedicines.indexOf(selected);
-
-        allMedicines.set(index, updated);
+        reloadMedicines();
 
         allSales.add(0, sale);
 
@@ -832,8 +835,389 @@ public class MedicineController {
         showAlert(
                 "Sale Completed",
                 quantity + " x " + sale.getMedicineName()
-                        + "\nTotal: " + String.format("%.2f", total)
+                        + "\nTotal: " + String.format("%.2f", sale.getTotal())
         );
+    }
+
+    // =========================================================
+    // DEMO: TWO USERS SELL AT THE SAME TIME (two windows)
+    // =========================================================
+
+    // Starts two threads ("User A" and "User B") that sell the selected medicine
+    // at the SAME moment. Each user gets his own result window.
+    // Both threads call the synchronized service.sellMedicine(...), so
+    // one sale succeeds and the other one is rejected if the stock is not enough.
+    private void simulateTwoUsers() {
+
+        // each user has his OWN medicine and his OWN quantity
+        Medicine medicineA =
+                salesView.getUserAMedicineBox().getValue();
+
+        Medicine medicineB =
+                salesView.getUserBMedicineBox().getValue();
+
+        if (medicineA == null || medicineB == null) {
+
+            showAlert(
+                    "No Medicine Selected",
+                    "Please select a medicine for User A and for User B."
+            );
+
+            return;
+        }
+
+        int quantityA =
+                readQuantity(
+                        salesView.getUserAQuantityField().getText(),
+                        "User A"
+                );
+
+        if (quantityA < 0) {
+            return;
+        }
+
+        int quantityB =
+                readQuantity(
+                        salesView.getUserBQuantityField().getText(),
+                        "User B"
+                );
+
+        if (quantityB < 0) {
+            return;
+        }
+
+        // radio button on the Sales page: with / without synchronization
+        boolean useSync = salesView.isSynchronizedMode();
+
+        // both threads wait here, then start at the same moment
+        CountDownLatch go = new CountDownLatch(1);
+
+        startUserThread("User A", 0, medicineA.getName(), quantityA, useSync, go);
+        startUserThread("User B", 1, medicineB.getName(), quantityB, useSync, go);
+
+        go.countDown();
+    }
+
+    // reads a whole number > 0; shows an alert and returns -1 if it is not valid
+    private int readQuantity(String text, String user) {
+
+        try {
+
+            int quantity = Integer.parseInt(text.trim());
+
+            if (quantity > 0) {
+                return quantity;
+            }
+
+        } catch (NumberFormatException e) {
+            // falls through to the alert
+        }
+
+        showAlert(
+                "Invalid Data",
+                user + ": quantity must be a whole number greater than zero."
+        );
+
+        return -1;
+    }
+
+    private void startUserThread(
+            String user,
+            int position,
+            String medicineName,
+            int quantity,
+            boolean useSync,
+            CountDownLatch go) {
+
+        Thread thread = new Thread(() -> {
+
+            Sale sale = null;
+            String message;
+
+            try {
+
+                go.await();
+
+                if (useSync) {
+
+                    // synchronized: one sale at a time
+                    sale = service.sellMedicine(medicineName, quantity);
+
+                } else {
+
+                    // NOT synchronized: shows the race condition
+                    sale = service.sellMedicineWithoutSync(medicineName, quantity);
+                }
+
+                message = "Sale completed: " + quantity + " x " + medicineName
+                        + "\nTotal: " + String.format("%.2f", sale.getTotal());
+
+            } catch (IllegalStateException e) {
+
+                // not enough stock (another user bought first)
+                message = e.getMessage();
+
+            } catch (InterruptedException e) {
+
+                Thread.currentThread().interrupt();
+
+                message = "Sale was interrupted.";
+            }
+
+            final Sale doneSale = sale;
+            final String doneMessage = message;
+
+            // screens may only be changed from the JavaFX thread
+            Platform.runLater(() -> {
+
+                if (doneSale != null) {
+                    allSales.add(0, doneSale);
+                }
+
+                reloadMedicines();
+
+                showUserWindow(user, "Sales", position, doneSale != null, useSync, doneMessage, null);
+            });
+        });
+
+        thread.setName(user);
+
+        thread.setDaemon(true);
+
+        thread.start();
+    }
+
+    // a small window that shows the result of ONE user's sale
+    private void showUserWindow(
+            String user,
+            String page,
+            int position,
+            boolean success,
+            boolean useSync,
+            String message,
+            javafx.stage.Window owner) {
+
+        Label title = new Label(user + "  -  " + page);
+
+        Label result =
+                new Label(
+                        "Mode: " + (useSync ? "WITH synchronization" : "WITHOUT synchronization")
+                                + "\n\n"
+                                + (success ? "SUCCESS\n\n" : "ERROR\n\n") + message
+                );
+
+        result.setWrapText(true);
+
+        Button close = new Button("Close");
+
+        VBox box = new VBox(15, title, result, close);
+
+        box.setPadding(new Insets(25));
+
+        Stage window = new Stage();
+
+        // a window opened while the Add Medicine dialog is open must belong to it,
+        // otherwise the modal dialog would block it
+        if (owner != null) {
+            window.initOwner(owner);
+        }
+
+        window.setTitle(user + " - " + page);
+
+        window.setScene(new Scene(box, 340, 230));
+
+        // put the two windows side by side
+        window.setX(250 + position * 380);
+        window.setY(250);
+
+        close.setOnAction(event -> window.close());
+
+        window.show();
+    }
+
+    // =========================================================
+    // DEMO: TWO USERS ADD STOCK TO THE SAME MEDICINE AT THE SAME TIME
+    // =========================================================
+
+    // Both users add stock to an existing medicine at the SAME moment.
+    //   WITHOUT synchronization: stock 5 + 5 + 5 ends as 10  (one addition is lost)
+    //   WITH synchronization:    stock 5 + 5 + 5 ends as 15  (correct)
+    private void simulateTwoStockAdds(AddMedicineView addView) {
+
+        Medicine medicineA =
+                addView.getUserAMedicineBox().getValue();
+
+        Medicine medicineB =
+                addView.getUserBMedicineBox().getValue();
+
+        if (medicineA == null || medicineB == null) {
+
+            showAlert(
+                    "No Medicine Selected",
+                    "Please select a medicine for User A and for User B."
+            );
+
+            return;
+        }
+
+        int amountA =
+                readQuantity(
+                        addView.getUserAQuantityField().getText(),
+                        "User A"
+                );
+
+        if (amountA < 0) {
+            return;
+        }
+
+        int amountB =
+                readQuantity(
+                        addView.getUserBQuantityField().getText(),
+                        "User B"
+                );
+
+        if (amountB < 0) {
+            return;
+        }
+
+        boolean useSync = addView.isSynchronizedMode();
+
+        String nameA = medicineA.getName();
+
+        boolean sameMedicine = nameA.equals(medicineB.getName());
+
+        // the stock before, to show what the final stock SHOULD be
+        int stockBefore = currentStock(nameA);
+
+        addView.setSimulationResult("Running...");
+
+        // both threads wait here, then start at the same moment
+        CountDownLatch go = new CountDownLatch(1);
+
+        Thread userA =
+                startStockThread("User A", 0, nameA, amountA, useSync, go, addView.getStage());
+
+        Thread userB =
+                startStockThread("User B", 1, medicineB.getName(), amountB, useSync, go, addView.getStage());
+
+        // waits for both users, then shows the final stock
+        Thread summary = new Thread(() -> {
+
+            try {
+
+                userA.join();
+                userB.join();
+
+            } catch (InterruptedException e) {
+
+                Thread.currentThread().interrupt();
+            }
+
+            Platform.runLater(() -> {
+
+                reloadMedicines();
+
+                if (!sameMedicine) {
+
+                    addView.setSimulationResult("Done. Check the Medicines table.");
+
+                    return;
+                }
+
+                int expected = stockBefore + amountA + amountB;
+
+                int actual = currentStock(nameA);
+
+                addView.setSimulationResult(
+                        "Final stock of " + nameA + ": " + actual
+                                + "   (expected " + stockBefore + " + " + amountA
+                                + " + " + amountB + " = " + expected + ")\n"
+                                + (actual == expected
+                                ? "CORRECT: no addition was lost."
+                                : "WRONG: an addition was lost (race condition)!")
+                );
+            });
+        });
+
+        summary.setDaemon(true);
+
+        summary.start();
+
+        go.countDown();
+    }
+
+    private Thread startStockThread(
+            String user,
+            int position,
+            String medicineName,
+            int amount,
+            boolean useSync,
+            CountDownLatch go,
+            javafx.stage.Window owner) {
+
+        Thread thread = new Thread(() -> {
+
+            Medicine result = null;
+            String message;
+
+            try {
+
+                go.await();
+
+                if (useSync) {
+
+                    // synchronized: one addition at a time
+                    result = service.addStock(medicineName, amount);
+
+                } else {
+
+                    // NOT synchronized: shows the lost update
+                    result = service.addStockWithoutSync(medicineName, amount);
+                }
+
+                message = "Added " + amount + " x " + medicineName
+                        + "\nStock after this user: " + result.getQuantity();
+
+            } catch (IllegalStateException e) {
+
+                message = e.getMessage();
+
+            } catch (InterruptedException e) {
+
+                Thread.currentThread().interrupt();
+
+                message = "Was interrupted.";
+            }
+
+            final boolean success = result != null;
+            final String doneMessage = message;
+
+            // screens may only be changed from the JavaFX thread
+            Platform.runLater(() ->
+                    showUserWindow(user, "Add Medicine", position, success, useSync, doneMessage, owner)
+            );
+        });
+
+        thread.setName(user);
+
+        thread.setDaemon(true);
+
+        thread.start();
+
+        return thread;
+    }
+
+    // the stock of a medicine, read from the file (-1 if it does not exist)
+    private int currentStock(String name) {
+
+        for (Medicine medicine : service.loadMedicines()) {
+
+            if (medicine.getName().equals(name)) {
+                return medicine.getQuantity();
+            }
+        }
+
+        return -1;
     }
 
     // =========================================================

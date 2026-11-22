@@ -11,6 +11,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Thread-safe sales log. Uses the same DataLock as MedicineService.
+ */
 public class SaleService {
 
     private final String filePath = "data/sales.txt";
@@ -41,49 +44,52 @@ public class SaleService {
 
     public List<Sale> loadSales() {
 
-        ensureFile();
+        synchronized (DataLock.LOCK) {
 
-        List<Sale> sales = new ArrayList<>();
+            ensureFile();
 
-        try (BufferedReader reader =
-                     new BufferedReader(new FileReader(filePath))) {
+            List<Sale> sales = new ArrayList<>();
 
-            String line;
+            try (BufferedReader reader =
+                         new BufferedReader(new FileReader(filePath))) {
 
-            while ((line = reader.readLine()) != null) {
+                String line;
 
-                if (line.trim().isEmpty()) {
-                    continue;
+                while ((line = reader.readLine()) != null) {
+
+                    if (line.trim().isEmpty()) {
+                        continue;
+                    }
+
+                    String[] parts = line.split(",");
+
+                    if (parts.length < 4) {
+                        continue;
+                    }
+
+                    try {
+
+                        sales.add(
+                                new Sale(
+                                        parts[0].trim(),
+                                        Integer.parseInt(parts[1].trim()),
+                                        Double.parseDouble(parts[2].trim()),
+                                        parts[3].trim()
+                                )
+                        );
+
+                    } catch (NumberFormatException e) {
+                        // skip broken line
+                    }
                 }
 
-                String[] parts = line.split(",");
+            } catch (IOException e) {
 
-                if (parts.length < 4) {
-                    continue;
-                }
-
-                try {
-
-                    sales.add(
-                            new Sale(
-                                    parts[0].trim(),
-                                    Integer.parseInt(parts[1].trim()),
-                                    Double.parseDouble(parts[2].trim()),
-                                    parts[3].trim()
-                            )
-                    );
-
-                } catch (NumberFormatException e) {
-                    // skip broken line
-                }
+                e.printStackTrace();
             }
 
-        } catch (IOException e) {
-
-            e.printStackTrace();
+            return sales;
         }
-
-        return sales;
     }
 
     // =========================================================
@@ -92,26 +98,29 @@ public class SaleService {
 
     public void addSale(Sale sale) {
 
-        ensureFile();
+        synchronized (DataLock.LOCK) {
 
-        try (BufferedWriter writer =
-                     new BufferedWriter(new FileWriter(filePath, true))) {
+            ensureFile();
 
-            writer.write(
-                    sale.getMedicineName()
-                            + ","
-                            + sale.getQuantity()
-                            + ","
-                            + sale.getTotal()
-                            + ","
-                            + sale.getDateTime()
-            );
+            try (BufferedWriter writer =
+                         new BufferedWriter(new FileWriter(filePath, true))) {
 
-            writer.newLine();
+                writer.write(
+                        sale.getMedicineName()
+                                + ","
+                                + sale.getQuantity()
+                                + ","
+                                + sale.getTotal()
+                                + ","
+                                + sale.getDateTime()
+                );
 
-        } catch (IOException e) {
+                writer.newLine();
 
-            e.printStackTrace();
+            } catch (IOException e) {
+
+                e.printStackTrace();
+            }
         }
     }
 }

@@ -1,16 +1,25 @@
 package sample.view;
 
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.RadioButton;
+import javafx.scene.control.Separator;
 import javafx.scene.control.TextField;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.util.StringConverter;
+
+import sample.model.Medicine;
 
 public class AddMedicineView {
 
@@ -23,7 +32,40 @@ public class AddMedicineView {
     private final Button saveButton;
     private final Button cancelButton;
 
+    // ---------------- two users adding stock at the same time (demo) ----------------
+
+    private final RadioButton syncOnRadio =
+            new RadioButton("With synchronization");
+
+    private final RadioButton syncOffRadio =
+            new RadioButton("Without synchronization");
+
+    private final ComboBox<Medicine> userAMedicineBox =
+            new ComboBox<>();
+
+    private final TextField userAQuantityField =
+            new TextField();
+
+    private final ComboBox<Medicine> userBMedicineBox =
+            new ComboBox<>();
+
+    private final TextField userBQuantityField =
+            new TextField();
+
+    private final Button simulateButton =
+            new Button("👥  Simulate 2 users");
+
+    private final Label simulationResult =
+            new Label();
+
+    // the normal window (no medicines list needed for adding a NEW medicine)
     public AddMedicineView() {
+
+        this(FXCollections.observableArrayList());
+    }
+
+    // 'medicines' fills the two user combo boxes of the simulation section
+    public AddMedicineView(ObservableList<Medicine> medicines) {
 
         stage = new Stage();
 
@@ -147,6 +189,13 @@ public class AddMedicineView {
         );
 
         // =========================
+        // Two users add stock at the same time
+        // =========================
+
+        VBox simulationBox =
+                createSimulationSection(medicines);
+
+        // =========================
         // Root
         // =========================
 
@@ -160,7 +209,9 @@ public class AddMedicineView {
         root.getChildren().addAll(
                 title,
                 form,
-                buttons
+                buttons,
+                new Separator(),
+                simulationBox
         );
 
         // =========================
@@ -170,11 +221,110 @@ public class AddMedicineView {
         Scene scene =
                 new Scene(
                         root,
-                        450,
-                        350
+                        620,
+                        640
                 );
 
         stage.setScene(scene);
+    }
+
+    // =========================================================
+    // SIMULATION SECTION
+    // =========================================================
+
+    private VBox createSimulationSection(ObservableList<Medicine> medicines) {
+
+        Label simulationTitle =
+                new Label("Two users add stock to an existing medicine at the same time");
+
+        // ----- mode: with / without synchronization -----
+
+        ToggleGroup modeGroup =
+                new ToggleGroup();
+
+        syncOnRadio.setToggleGroup(modeGroup);
+        syncOffRadio.setToggleGroup(modeGroup);
+
+        syncOnRadio.setSelected(true);
+
+        HBox modeRow =
+                new HBox(20,
+                        new Label("Mode:"),
+                        syncOnRadio,
+                        syncOffRadio
+                );
+
+        modeRow.setAlignment(Pos.CENTER_LEFT);
+
+        // ----- User A / User B: each one chooses his own medicine and amount -----
+
+        setupUserBox(userAMedicineBox, userAQuantityField, medicines);
+        setupUserBox(userBMedicineBox, userBQuantityField, medicines);
+
+        Label userALabel = new Label("User A");
+        Label userBLabel = new Label("User B");
+
+        userALabel.setMinWidth(60);
+        userBLabel.setMinWidth(60);
+
+        HBox userARow =
+                new HBox(15, userALabel, userAMedicineBox, userAQuantityField);
+
+        HBox userBRow =
+                new HBox(15, userBLabel, userBMedicineBox, userBQuantityField);
+
+        userARow.setAlignment(Pos.CENTER_LEFT);
+        userBRow.setAlignment(Pos.CENTER_LEFT);
+
+        simulateButton.setPrefHeight(40);
+
+        simulationResult.setWrapText(true);
+
+        return new VBox(10,
+                simulationTitle,
+                modeRow,
+                userARow,
+                userBRow,
+                simulateButton,
+                simulationResult
+        );
+    }
+
+    private void setupUserBox(
+            ComboBox<Medicine> box,
+            TextField amountField,
+            ObservableList<Medicine> medicines) {
+
+        box.setItems(medicines);
+
+        box.setPromptText("Select medicine");
+        box.setPrefWidth(300);
+        box.setPrefHeight(40);
+
+        box.setConverter(new StringConverter<Medicine>() {
+
+            @Override
+            public String toString(Medicine medicine) {
+
+                if (medicine == null) {
+                    return "";
+                }
+
+                return medicine.getName()
+                        + "  (stock: "
+                        + medicine.getQuantity()
+                        + ")";
+            }
+
+            @Override
+            public Medicine fromString(String string) {
+                return null;
+            }
+        });
+
+        amountField.setPromptText("Add qty");
+        amountField.setPrefWidth(110);
+        amountField.setPrefHeight(40);
     }
 
     // =========================
@@ -203,6 +353,37 @@ public class AddMedicineView {
 
     public Button getCancelButton() {
         return cancelButton;
+    }
+
+    // ---------------- simulation getters ----------------
+
+    public Button getSimulateButton() {
+        return simulateButton;
+    }
+
+    public ComboBox<Medicine> getUserAMedicineBox() {
+        return userAMedicineBox;
+    }
+
+    public TextField getUserAQuantityField() {
+        return userAQuantityField;
+    }
+
+    public ComboBox<Medicine> getUserBMedicineBox() {
+        return userBMedicineBox;
+    }
+
+    public TextField getUserBQuantityField() {
+        return userBQuantityField;
+    }
+
+    // true = "With synchronization", false = "Without synchronization"
+    public boolean isSynchronizedMode() {
+        return syncOnRadio.isSelected();
+    }
+
+    public void setSimulationResult(String text) {
+        simulationResult.setText(text);
     }
 
     public void show() {
