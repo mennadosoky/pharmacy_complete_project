@@ -1,5 +1,4 @@
 package sample.service;
-
 /**
  * ONE lock shared by every service.
  *
@@ -8,9 +7,7 @@ package sample.service;
  * It is static, so it works even if several service objects are created.
  */
 final class DataLock {
-
     static final Object LOCK = new Object();
-
     private DataLock() {
     }
 }
